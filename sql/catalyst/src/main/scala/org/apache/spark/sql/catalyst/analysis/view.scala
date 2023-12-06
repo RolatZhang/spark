@@ -67,3 +67,5 @@ object GlobalTempView extends ViewType
  * while the local temporary view exists, unless the view name is qualified by database.
  */
 object PersistedView extends ViewType
+
+object LogicalView extends ViewType

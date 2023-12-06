@@ -615,7 +615,18 @@ class SessionCatalog(
       name: String,
       viewDefinition: TemporaryViewRelation,
       overrideIfExists: Boolean): Unit = {
-    globalTempViewManager.create(formatTableName(name), viewDefinition, overrideIfExists)
+    globalTempViewManager.create(null, formatTableName(name), viewDefinition, overrideIfExists)
+  }
+
+  /**
+   * Create a logical view.
+   */
+  def createLogicalView(
+      db: String,
+      name: String,
+      viewDefinition: TemporaryViewRelation,
+      overrideIfExists: Boolean): Unit = {
+    globalTempViewManager.create(formatTableName(db), formatTableName(name), viewDefinition, overrideIfExists)
   }
 
   /**
@@ -634,7 +645,7 @@ class SessionCatalog(
         false
       }
     } else if (formatDatabaseName(name.database.get) == globalTempViewManager.database) {
-      globalTempViewManager.update(viewName, viewDefinition)
+      globalTempViewManager.update(null, viewName, viewDefinition)
     } else {
       false
     }
@@ -662,7 +673,7 @@ class SessionCatalog(
    * Return a global temporary view exactly as it was stored.
    */
   def getRawGlobalTempView(name: String): Option[TemporaryViewRelation] = {
-    globalTempViewManager.get(formatTableName(name))
+    globalTempViewManager.get(null, formatTableName(name))
   }
 
   /**
@@ -670,6 +681,10 @@ class SessionCatalog(
    */
   def getGlobalTempView(name: String): Option[View] = {
     getRawGlobalTempView(name).map(getTempViewPlan)
+  }
+
+  def getGlobalTempView(db: String, name: String): Option[View] = {
+    globalTempViewManager.get(db, formatTableName(name)).map(getTempViewPlan)
   }
 
   /**
@@ -687,7 +702,7 @@ class SessionCatalog(
    * Returns true if this view is dropped successfully, false otherwise.
    */
   def dropGlobalTempView(name: String): Boolean = {
-    globalTempViewManager.remove(formatTableName(name))
+    globalTempViewManager.remove(null, formatTableName(name))
   }
 
   // -------------------------------------------------------------
@@ -708,7 +723,7 @@ class SessionCatalog(
     if (name.database.isEmpty) {
       tempViews.get(table).map(_.tableMeta).getOrElse(getTableMetadata(name))
     } else if (formatDatabaseName(name.database.get) == globalTempViewManager.database) {
-      globalTempViewManager.get(table).map(_.tableMeta)
+      globalTempViewManager.get(null, table).map(_.tableMeta)
         .getOrElse(throw new NoSuchTableException(globalTempViewManager.database, table))
     } else {
       getTableMetadata(name)
@@ -735,7 +750,7 @@ class SessionCatalog(
     val oldTableName = formatTableName(oldName.table)
     val newTableName = formatTableName(newName.table)
     if (db == globalTempViewManager.database) {
-      globalTempViewManager.rename(oldTableName, newTableName)
+      globalTempViewManager.rename(null, oldTableName, newTableName)
     } else {
       requireDbExists(db)
       if (oldName.database.isDefined || !tempViews.contains(oldTableName)) {
@@ -772,8 +787,8 @@ class SessionCatalog(
       purge: Boolean): Unit = synchronized {
     val db = formatDatabaseName(name.database.getOrElse(currentDb))
     val table = formatTableName(name.table)
-    if (db == globalTempViewManager.database) {
-      val viewExists = globalTempViewManager.remove(table)
+    if (globalTempViewManager.isTempDatabase(db)) {
+      val viewExists = globalTempViewManager.remove(db, table)
       if (!viewExists && !ignoreIfNotExists) {
         throw new NoSuchTableException(globalTempViewManager.database, table)
       }
@@ -813,8 +828,8 @@ class SessionCatalog(
     synchronized {
       val db = formatDatabaseName(name.database.getOrElse(currentDb))
       val table = formatTableName(name.table)
-      if (db == globalTempViewManager.database) {
-        globalTempViewManager.get(table).map { viewDef =>
+      if (globalTempViewManager.isTempDatabase(db)) {
+        globalTempViewManager.get(db, table).map { viewDef =>
           SubqueryAlias(table, db, getTempViewPlan(viewDef))
         }.getOrElse(throw new NoSuchTableException(db, table))
       } else if (name.database.isDefined || !tempViews.contains(table)) {
@@ -950,9 +965,9 @@ class SessionCatalog(
 
   def lookupGlobalTempView(db: String, table: String): Option[SubqueryAlias] = {
     val formattedDB = formatDatabaseName(db)
-    if (formattedDB == globalTempViewManager.database) {
+    if (globalTempViewManager.isTempDatabase(formattedDB)) {
       val formattedTable = formatTableName(table)
-      getGlobalTempView(formattedTable).map { view =>
+      getGlobalTempView(formattedDB, formattedTable).map { view =>
         SubqueryAlias(formattedTable, formattedDB, view)
       }
     } else {
@@ -973,10 +988,13 @@ class SessionCatalog(
     val tableName = formatTableName(name.table)
     if (name.database.isEmpty) {
       tempViews.get(tableName).map(getTempViewPlan)
-    } else if (formatDatabaseName(name.database.get) == globalTempViewManager.database) {
-      globalTempViewManager.get(tableName).map(getTempViewPlan)
     } else {
-      None
+      val db = formatDatabaseName(name.database.get)
+      if (globalTempViewManager.isTempDatabase(db)) {
+        globalTempViewManager.get(db, tableName).map(getTempViewPlan)
+      } else {
+        None
+      }
     }
   }
 
@@ -1032,9 +1050,9 @@ class SessionCatalog(
       pattern: String,
       includeLocalTempViews: Boolean): Seq[TableIdentifier] = {
     val dbName = formatDatabaseName(db)
-    val dbTables = if (dbName == globalTempViewManager.database) {
-      globalTempViewManager.listViewNames(pattern).map { name =>
-        TableIdentifier(name, Some(globalTempViewManager.database))
+    val dbTables = if (globalTempViewManager.isTempDatabase(dbName)) {
+      globalTempViewManager.listViewNames(dbName, pattern).map { name =>
+        TableIdentifier(name, Some(dbName))
       }
     } else {
       requireDbExists(dbName)
@@ -1055,9 +1073,9 @@ class SessionCatalog(
    */
   def listViews(db: String, pattern: String): Seq[TableIdentifier] = {
     val dbName = formatDatabaseName(db)
-    val dbViews = if (dbName == globalTempViewManager.database) {
-      globalTempViewManager.listViewNames(pattern).map { name =>
-        TableIdentifier(name, Some(globalTempViewManager.database))
+    val dbViews = if (globalTempViewManager.isTempDatabase(dbName)) {
+      globalTempViewManager.listViewNames(dbName, pattern).map { name =>
+        TableIdentifier(name, Some(dbName))
       }
     } else {
       requireDbExists(dbName)

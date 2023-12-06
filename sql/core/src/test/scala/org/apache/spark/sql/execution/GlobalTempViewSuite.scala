@@ -92,6 +92,16 @@ class GlobalTempViewSuite extends QueryTest with SharedSparkSession {
     }
   }
 
+  test("logical VIEW") {
+    sql("CREATE logical VIEW logicalDb1.table AS SELECT 1")
+    checkAnswer(spark.table("logicalDb1.table"), Row(1))
+    sql("drop logical VIEW logicalDb1.table")
+    sql("CREATE logical VIEW logicalDb1.table AS SELECT 1, 2")
+    checkAnswer(spark.table("logicalDb1.table"), Row(1, 2))
+    sql("CREATE logical VIEW logicalDb2.table AS SELECT 1, 2, 3")
+    checkAnswer(spark.table("logicalDb2.table"), Row(1, 2, 3))
+  }
+
   test("global temp view database should be preserved") {
     val e = intercept[AnalysisException](sql(s"CREATE DATABASE $globalTempDB"))
     assert(e.message.contains("system preserved database"))

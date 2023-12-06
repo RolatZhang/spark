@@ -39,13 +39,22 @@ class GlobalTempViewManager(val database: String) {
 
   /** List of view definitions, mapping from view name to logical plan. */
   @GuardedBy("this")
-  private val viewDefinitions = new mutable.HashMap[String, TemporaryViewRelation]
+  private val databaseViewDefinitions = new mutable.HashMap[String, TemporaryViewDefinition]
+
+  def isTempDatabase(database: String): Boolean = {
+    databaseViewDefinitions.contains(database)
+  }
+
+  private def getViewDefinitions(db: String): mutable.HashMap[String, TemporaryViewRelation] = {
+    val key = if (db == null) database else db
+    databaseViewDefinitions.getOrElseUpdate(key, TemporaryViewDefinition()).viewDefinitions
+  }
 
   /**
    * Returns the global view definition which matches the given name, or None if not found.
    */
-  def get(name: String): Option[TemporaryViewRelation] = synchronized {
-    viewDefinitions.get(name)
+  def get(db: String, name: String): Option[TemporaryViewRelation] = synchronized {
+    getViewDefinitions(db).get(name)
   }
 
   /**
@@ -53,9 +62,11 @@ class GlobalTempViewManager(val database: String) {
    * `overrideIfExists` is false.
    */
   def create(
+      db: String,
       name: String,
       viewDefinition: TemporaryViewRelation,
       overrideIfExists: Boolean): Unit = synchronized {
+    val viewDefinitions = getViewDefinitions(db)
     if (!overrideIfExists && viewDefinitions.contains(name)) {
       throw new TempTableAlreadyExistsException(name)
     }
@@ -66,8 +77,10 @@ class GlobalTempViewManager(val database: String) {
    * Updates the global temp view if it exists, returns true if updated, false otherwise.
    */
   def update(
+      db: String,
       name: String,
       viewDefinition: TemporaryViewRelation): Boolean = synchronized {
+    val viewDefinitions = getViewDefinitions(db)
     if (viewDefinitions.contains(name)) {
       viewDefinitions.put(name, viewDefinition)
       true
@@ -79,8 +92,8 @@ class GlobalTempViewManager(val database: String) {
   /**
    * Removes the global temp view if it exists, returns true if removed, false otherwise.
    */
-  def remove(name: String): Boolean = synchronized {
-    viewDefinitions.remove(name).isDefined
+  def remove(db: String, name: String): Boolean = synchronized {
+    getViewDefinitions(db).remove(name).isDefined
   }
 
   /**
@@ -88,7 +101,8 @@ class GlobalTempViewManager(val database: String) {
    * issue an exception if the source view exists but the destination view already exists. Returns
    * true if renamed, false otherwise.
    */
-  def rename(oldName: String, newName: String): Boolean = synchronized {
+  def rename(db: String, oldName: String, newName: String): Boolean = synchronized {
+    val viewDefinitions = getViewDefinitions(db)
     if (viewDefinitions.contains(oldName)) {
       if (viewDefinitions.contains(newName)) {
         throw QueryCompilationErrors.renameTempViewToExistingViewError(oldName, newName)
@@ -106,7 +120,8 @@ class GlobalTempViewManager(val database: String) {
   /**
    * Lists the names of all global temporary views.
    */
-  def listViewNames(pattern: String): Seq[String] = synchronized {
+  def listViewNames(db: String, pattern: String): Seq[String] = synchronized {
+    val viewDefinitions = getViewDefinitions(db)
     StringUtils.filterPattern(viewDefinitions.keys.toSeq, pattern)
   }
 
@@ -114,6 +129,10 @@ class GlobalTempViewManager(val database: String) {
    * Clears all the global temporary views.
    */
   def clear(): Unit = synchronized {
-    viewDefinitions.clear()
+    databaseViewDefinitions.clear()
   }
+}
+
+case class TemporaryViewDefinition() {
+  val viewDefinitions = new mutable.HashMap[String, TemporaryViewRelation]
 }

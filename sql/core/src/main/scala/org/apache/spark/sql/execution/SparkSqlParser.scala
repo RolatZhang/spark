@@ -19,6 +19,7 @@ package org.apache.spark.sql.execution
 
 import java.time.ZoneOffset
 import java.util.{Locale, TimeZone}
+
 import javax.ws.rs.core.UriBuilder
 
 import scala.collection.JavaConverters._
@@ -27,7 +28,7 @@ import org.antlr.v4.runtime.{ParserRuleContext, Token}
 import org.antlr.v4.runtime.tree.TerminalNode
 
 import org.apache.spark.sql.catalyst.TableIdentifier
-import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, PersistedView, UnresolvedDBObjectName, UnresolvedFunc}
+import org.apache.spark.sql.catalyst.analysis.{GlobalTempView, LocalTempView, LogicalView, PersistedView, UnresolvedDBObjectName, UnresolvedFunc}
 import org.apache.spark.sql.catalyst.catalog._
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser._
@@ -550,7 +551,7 @@ class SparkSqlAstBuilder extends AstBuilder {
         plan(ctx.query),
         false,
         false,
-        GlobalTempView)
+        LogicalView)
 
     }
 
@@ -582,7 +583,7 @@ class SparkSqlAstBuilder extends AstBuilder {
         plan(ctx.query),
         false,
         true,
-        GlobalTempView)
+        LogicalView)
 
     }
 
